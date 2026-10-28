@@ -1191,28 +1191,18 @@ async function generateMaterial(material) {
   $('#generation-status').innerHTML =
     `<div class="generation-loading"><span class="spinner"></span><strong>Transformando seu material em aprendizado…</strong><p>Criando ${material.count || 6} exercícios no nível ${esc(material.level)}. Pode levar alguns instantes.</p></div>`;
   const settings = { provider, key: apiKey, model };
-  try {
-    let prepared;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const requestMaterial =
-        attempt === 0
-          ? material
-          : {
-              ...material,
-              correction: `A tentativa anterior falhou na validação: ${prepared.issues.join(' ')} Gere novamente a lista completa, corrigindo esses problemas.`,
-            };
-      const raw = await generateLesson(settings, requestMaterial);
-      prepared = prepareGeneratedLesson(raw, material.count || 6, material.types);
-      if (!prepared.issues.length) break;
-      if (attempt === 0 && $('#generation-status'))
-        $('#generation-status').textContent =
-          'A IA está corrigindo a estrutura dos exercícios. Aguarde…';
+  const targetCount = material.count || 6;
+  const usable = [];
+  const addUsable = (questions) => {
+    for (const question of questions) {
+      if (
+        usable.length < targetCount &&
+        !usable.some((q) => q.prompt === question.prompt && q.answer === question.answer)
+      )
+        usable.push(question);
     }
-    if (prepared.issues.length)
-      throw new Error(
-        `A IA não conseguiu concluir a correção. ${prepared.issues.join(' ')} Seu material está salvo.`,
-      );
-    const questions = prepared.questions;
+  };
+  const storeLesson = (questions) => {
     const normalized = questions.map((q) => {
       const item = { ...q };
       if (!['choice', 'reading', 'match'].includes(q.type)) delete item.options;
@@ -1230,15 +1220,54 @@ async function generateMaterial(material) {
     };
     state.custom.push(lesson);
     save();
-    generating = false;
+    return lesson;
+  };
+  const practiceLesson = (lesson) => {
     closeModal();
     navigate('learn');
-    toast('Sua trilha personalizada está pronta!');
     startQuiz(lesson.questions, lesson.title, lesson.level, lesson.id);
+  };
+  try {
+    let prepared;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const requestMaterial =
+        attempt === 0
+          ? material
+          : {
+              ...material,
+              count: targetCount - usable.length,
+              correction: {
+                instructions:
+                  'Retorne somente a quantidade solicitada de exercícios válidos para completar a trilha. Corrija os exercícios inválidos abaixo; não repita os já aprovados. Para alternativas, answer deve copiar exatamente o texto de uma opção, nunca a letra ou uma justificativa.',
+                issues: prepared.issues,
+                rejected: prepared.questions.filter((q) => !prepared.validQuestions.includes(q)),
+                approvedPrompts: usable.map((q) => q.prompt),
+              },
+            };
+      const raw = await generateLesson(settings, requestMaterial);
+      prepared = prepareGeneratedLesson(raw, requestMaterial.count || 6, material.types);
+      addUsable(prepared.validQuestions);
+      if (usable.length === targetCount) break;
+      if (attempt === 0 && $('#generation-status'))
+        $('#generation-status').textContent =
+          `${usable.length} exercícios prontos. A IA está corrigindo os restantes…`;
+    }
+    if (usable.length < targetCount)
+      throw new Error(
+        `A IA não conseguiu completar todos os exercícios. ${prepared.issues.join(' ')}`,
+      );
+    const lesson = storeLesson(usable);
+    generating = false;
+    practiceLesson(lesson);
+    toast('Sua trilha personalizada está pronta!');
   } catch (e) {
     generating = false;
+    const partial = usable.length ? storeLesson(usable) : null;
+    if (!$('#generation-status'))
+      openModal('Resultado da geração', '<div id="generation-status" role="status"></div>');
     $('#generation-status').innerHTML =
-      `<div class="generation-error"><strong>Seu material está salvo.</strong><p>${esc(e.name === 'TimeoutError' ? 'A geração demorou demais. Tente novamente.' : e.message === 'Failed to fetch' ? 'Não foi possível conectar ao provedor selecionado. Verifique sua conexão e tente novamente.' : e.message)}</p><button type="button" class="btn outline" id="generation-retry">Tentar novamente</button><button type="button" class="text-button" id="generation-library">Ir para minha biblioteca</button></div>`;
+      `<div class="generation-error"><strong>Seu material está salvo.</strong><p>${esc(e.name === 'TimeoutError' ? 'A geração demorou demais. Tente novamente.' : e.message === 'Failed to fetch' ? 'Não foi possível conectar ao provedor selecionado. Verifique sua conexão e tente novamente.' : e.message)}</p>${partial ? `<p>${partial.questions.length} de ${targetCount} exercícios foram validados e salvos em Minhas trilhas.</p><button type="button" class="btn primary" id="generation-practice">Praticar ${partial.questions.length} exercícios disponíveis</button>` : ''}<button type="button" class="btn outline" id="generation-retry">Tentar novamente</button><button type="button" class="text-button" id="generation-library">Ir para minha biblioteca</button></div>`;
+    if (partial) $('#generation-practice').onclick = () => practiceLesson(partial);
     $('#generation-retry').onclick = () => generateMaterial(material);
     $('#generation-library').onclick = () => {
       closeModal();

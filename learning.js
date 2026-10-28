@@ -86,7 +86,11 @@ export function validateQuestion(q) {
 export function prepareGeneratedLesson(raw, count, types) {
   const issues = [];
   if (!Array.isArray(raw))
-    return { questions: [], issues: ['A IA não retornou uma lista de exercícios.'] };
+    return {
+      questions: [],
+      validQuestions: [],
+      issues: ['A IA não retornou uma lista de exercícios.'],
+    };
   if (raw.length !== count)
     issues.push(`Foram recebidos ${raw.length} exercícios; eram esperados ${count}.`);
   const questions = raw.map((value, index) => {
@@ -104,6 +108,21 @@ export function prepareGeneratedLesson(raw, count, types) {
         (option) => typeof option === 'string' && normalize(option) === normalize(q.answer),
       );
       if (equivalent.length === 1) q.answer = equivalent[0];
+      else if (!q.options.includes(q.answer)) {
+        const stripLabel = (text) => text.replace(/^[A-D][).:\-]\s*/i, '');
+        const matching = q.options.filter(
+          (option) =>
+            typeof option === 'string' &&
+            normalize(stripLabel(option)) === normalize(stripLabel(q.answer)),
+        );
+        const letter = q.answer.match(/^([A-D])[).:]?$/i);
+        if (matching.length === 1) q.answer = matching[0];
+        else if (
+          letter &&
+          typeof q.options[letter[1].toUpperCase().charCodeAt(0) - 65] === 'string'
+        )
+          q.answer = q.options[letter[1].toUpperCase().charCodeAt(0) - 65];
+      }
     }
     if (
       q.type === 'order' &&
@@ -134,7 +153,13 @@ export function prepareGeneratedLesson(raw, count, types) {
     }
     return q;
   });
-  return { questions, issues };
+  return {
+    questions,
+    validQuestions: questions.filter(
+      (q) => validateQuestion(q) && (!types || types.includes(q.type)),
+    ),
+    issues,
+  };
 }
 export function validateBackup(d) {
   const str = (s, max = 30000) => typeof s === 'string' && s.length <= max;

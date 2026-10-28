@@ -647,3 +647,57 @@ test('generation repairs an incomplete lesson once and saves only a valid comple
   expect(saved.custom).toHaveLength(1);
   expect(saved.custom[0].questions).toHaveLength(6);
 });
+
+for (const outcome of ['invalid', 'quota', 'fixed']) {
+  test(`valid exercises survive failed generation and repair: ${outcome}`, async ({ page }) => {
+    await page.goto('/#settings');
+    await page.locator('#api-key').fill('gsk-test-only');
+    await page.getByRole('button', { name: 'Salvar chave', exact: true }).click();
+    const all = getQuestions('coffee');
+    const bad = {
+      type: 'choice',
+      prompt: 'Broken alternative',
+      answer: 'Missing answer',
+      options: ['One', 'Two'],
+      explanation: 'Needs repair.',
+    };
+    let calls = 0;
+    await page.route('https://api.groq.com/openai/v1/chat/completions', (route) => {
+      calls++;
+      if (calls === 2) {
+        const task = JSON.parse(route.request().postDataJSON().messages[1].content).task;
+        expect(task.count).toBe(1);
+        expect(task.correction.rejected[0].prompt).toBe(bad.prompt);
+        if (outcome === 'quota')
+          return route.fulfill({ status: 429, contentType: 'application/json', body: '{}' });
+      }
+      const questions =
+        calls === 1 ? [...all.slice(0, 5), bad] : outcome === 'fixed' ? [all[5]] : [bad];
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ questions }) } }],
+        }),
+      });
+    });
+    await page.goto('/#materials');
+    await page.getByRole('button', { name: 'Adicionar material', exact: false }).first().click();
+    await page.locator('[name="title"]').fill('Business English');
+    await page.locator('#material-content').fill('Emphasis and inversion.');
+    await page.getByRole('button', { name: 'Salvar e gerar exercícios', exact: true }).click();
+    if (outcome !== 'fixed') {
+      await expect(
+        page.getByRole('button', { name: 'Praticar 5 exercícios disponíveis' }),
+      ).toBeVisible();
+      await expect(page.locator('#generation-status')).toContainText('salvos em Minhas trilhas');
+      await page.getByRole('button', { name: 'Praticar 5 exercícios disponíveis' }).click();
+    }
+    await expect(page.locator('.quiz-modal')).toBeVisible();
+    expect(calls).toBe(2);
+    await page.reload();
+    const state = await page.evaluate(() => JSON.parse(localStorage.getItem('bloom.v1')));
+    expect(state.custom).toHaveLength(1);
+    expect(state.custom[0].questions).toHaveLength(outcome === 'fixed' ? 6 : 5);
+    expect(state.custom[0].questions.some((q) => q.prompt === bad.prompt)).toBe(false);
+  });
+}

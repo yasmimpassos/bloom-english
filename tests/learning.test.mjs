@@ -223,3 +223,22 @@ test('incomplete lessons report count and broken question without inventing answ
   assert.deepEqual(result.questions[0].words, ['Never', 'I', 'agreed.']);
   assert.ok(prepareGeneratedLesson([{ type: 'reading', passage: 42 }], 1).issues.length);
 });
+
+test('option labels are resolved but unrelated answers remain invalid and separate from usable questions', () => {
+  const base = {
+    type: 'choice',
+    prompt: 'Escolha a ênfase',
+    answer: 'B',
+    options: ['I does agree.', 'I do agree.'],
+    explanation: 'Use do.',
+  };
+  const result = prepareGeneratedLesson(
+    [base, { ...base, answer: 'B) I do agree.' }, { ...base, answer: 'I never agreed.' }],
+    3,
+  );
+  assert.equal(result.validQuestions.length, 2);
+  assert.equal(result.validQuestions[0].answer, 'I do agree.');
+  assert.equal(result.validQuestions[1].answer, 'I do agree.');
+  assert.match(result.issues.join(' '), /Exercício 3/);
+  assert.equal(base.answer, 'B');
+});

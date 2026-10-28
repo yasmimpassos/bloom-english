@@ -1,0 +1,127 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  providers,
+  connectionRequest,
+  generationRequest,
+  parseLessonResponse,
+  generateLesson,
+  testConnection,
+} from '../providers.js';
+const material = {
+  title: 'Cafeteria',
+  content: 'Order coffee',
+  level: 'A1',
+  count: 6,
+  types: ['choice', 'write'],
+};
+const settings = (provider) => ({
+  provider,
+  key: `test-${provider}-secret`,
+  model: providers[provider].model,
+});
+test('four providers use the correct API contract and credentials never enter body or URL', () => {
+  for (const provider of Object.keys(providers)) {
+    const config = settings(provider),
+      r = generationRequest(config, material);
+    assert.ok(r.url.startsWith('https://'));
+    assert.ok(!r.url.includes(config.key));
+    assert.ok(!JSON.stringify(r.body).includes(config.key));
+    const get = connectionRequest(config);
+    assert.ok(!get.url.includes(config.key));
+    if (provider === 'gemini') {
+      assert.equal(r.headers['x-goog-api-key'], config.key);
+      assert.equal(r.headers.Authorization, undefined);
+      assert.equal(r.body.generationConfig.responseMimeType, 'application/json');
+      assert.ok(r.body.generationConfig.responseJsonSchema.properties.questions);
+    } else assert.equal(r.headers.Authorization, `Bearer ${config.key}`);
+    if (provider === 'openai') assert.equal(r.body.store, false);
+    if (provider === 'groq') assert.equal(r.body.response_format.json_schema.strict, true);
+    if (provider === 'openrouter')
+      assert.deepEqual(r.body.provider.max_price, { prompt: 0, completion: 0 });
+  }
+});
+test('paid OpenRouter models and invalid endpoints cannot be selected', () => {
+  assert.throws(
+    () => generationRequest({ ...settings('openrouter'), model: 'openai/gpt-4.1' }, material),
+    /pagos estão bloqueados/,
+  );
+  assert.throws(
+    () => generationRequest({ ...settings('groq'), model: '../../malicious?key=x' }, material),
+    /modelo/,
+  );
+  assert.throws(
+    () => generationRequest({ ...settings('groq'), provider: 'unknown' }, material),
+    /provedor/,
+  );
+});
+test('all response shapes parse and malformed, refused or truncated replies are rejected', () => {
+  const text = JSON.stringify({ questions: [{ prompt: 'Test' }] });
+  assert.equal(
+    parseLessonResponse('gemini', {
+      candidates: [{ content: { parts: [{ thought: true, text: 'Ignore this' }, { text }] } }],
+    })[0].prompt,
+    'Test',
+  );
+  assert.equal(
+    parseLessonResponse('openai', { output: [{ content: [{ type: 'output_text', text }] }] })[0]
+      .prompt,
+    'Test',
+  );
+  for (const p of ['groq', 'openrouter'])
+    assert.equal(
+      parseLessonResponse(p, {
+        choices: [{ message: { content: '```json\n' + text + '\n```' } }],
+      })[0].prompt,
+      'Test',
+    );
+  assert.throws(
+    () =>
+      parseLessonResponse('groq', {
+        choices: [{ message: { content: 'truncated' }, finish_reason: 'length' }],
+      }),
+    /cortada/,
+  );
+  assert.throws(
+    () => parseLessonResponse('gemini', { promptFeedback: { blockReason: 'SAFETY' } }),
+    /não retornou/,
+  );
+  assert.throws(
+    () => parseLessonResponse('groq', { choices: [{ message: { content: 'not JSON' } }] }),
+    /formato inválido/,
+  );
+});
+test('quota and eligibility errors never fall back to a paid provider', async () => {
+  for (const [p, status] of [
+    ['groq', 429],
+    ['gemini', 403],
+    ['openrouter', 402],
+  ]) {
+    let calls = 0;
+    await assert.rejects(
+      () =>
+        generateLesson(settings(p), material, async () => {
+          calls++;
+          return new Response('{}', { status });
+        }),
+      /cota|limite|acesso/i,
+    );
+    assert.equal(calls, 1);
+  }
+});
+test('connection checks validate Groq model availability and OpenRouter keys without generation', async () => {
+  await assert.rejects(
+    () =>
+      testConnection(settings('groq'), async (url, options) => {
+        assert.ok(url.endsWith('/models'));
+        assert.equal(options.method, undefined);
+        return new Response(JSON.stringify({ data: [] }));
+      }),
+    /modelo não está disponível/,
+  );
+  const message = await testConnection(settings('openrouter'), async (url) => {
+    assert.ok(url.endsWith('/key'));
+    return new Response(JSON.stringify({ data: { is_free_tier: true } }));
+  });
+  assert.match(message, /disponibilidade/);
+});

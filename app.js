@@ -247,7 +247,7 @@ function filteredTopics() {
     : '<div class="empty-inline">Nenhuma trilha encontrada. Experimente outra palavra.</div>';
 }
 function materialsView() {
-  return `${heading('APRENDA COM O QUE TE INTERESSA', 'Seu conteúdo. Novas possibilidades.', 'Transforme seus textos e tópicos em exercícios para o seu momento.', button(`${icon('plus', 18)} Adicionar material`, 'new-material'))}<section class="materials-intro"><div class="intro-art">${icon('folder', 62)}<span>✦</span></div><div><h2>Da sua curiosidade para a prática.</h2><p>Escreva um tema como “na cafeteria”, cole suas anotações ou importe um arquivo TXT ou Markdown. A IA prepara atividades de leitura, gramática, escrita e muito mais.</p><div class="feature-pills"><span>${icon('check', 14)} Conteúdo no seu nível</span><span>${icon('check', 14)} Correções explicadas</span><span>${icon('check', 14)} Salvo para praticar depois</span></div></div></section><div class="section-title"><h2>Minha biblioteca <span class="count">${state.materials.length}</span></h2><span class="subtle">Seus materiais, sempre por perto.</span></div>${state.materials.length ? `<div class="list-grid">${state.materials.map((m) => `<article class="card material-card"><div class="card-top"><span class="file-icon">${icon('folder', 24)}</span><button class="icon-button" data-delete-material="${m.id}" aria-label="Excluir ${esc(m.title)}">${icon('trash', 17)}</button></div><span class="eyebrow">${esc(m.level)} · ${new Date(m.date).toLocaleDateString('pt-BR')}</span><h3>${esc(m.title)}</h3><p class="material-preview">${esc(m.content)}</p><div class="material-actions">${button(`${icon('bolt', 15)} Gerar exercícios`, 'generate-material', 'primary', `data-id="${m.id}"`)}<button class="icon-button" data-view-material="${m.id}" aria-label="Ler material">${icon('book', 19)}</button></div></article>`).join('')}</div>` : empty('folder', 'Sua biblioteca começa com uma ideia.', 'Que tal adicionar um tema ou aquele texto que você quer entender melhor?', button('Adicionar meu primeiro material', 'new-material'))}${!apiKey ? `<div class="api-notice">${icon('key', 20)}<span>Para gerar exercícios personalizados, escolha uma IA e conecte sua chave, incluindo opções com cota gratuita.</span><button class="text-button" data-page="settings">Configurar API ${icon('arrow', 16)}</button></div>` : ''}`;
+  return `${heading('APRENDA COM O QUE TE INTERESSA', 'Seu conteúdo. Novas possibilidades.', 'Transforme seus textos e tópicos em exercícios para o seu momento.', button(`${icon('plus', 18)} Adicionar material`, 'new-material'))}<section class="materials-intro"><div class="intro-art">${icon('folder', 62)}<span>✦</span></div><div><h2>Da sua curiosidade para a prática.</h2><p>Escreva um tema como “na cafeteria”, cole suas anotações ou importe um arquivo TXT ou Markdown. A IA prepara atividades de leitura, gramática, escrita e muito mais.</p><div class="feature-pills"><span>${icon('check', 14)} Conteúdo no seu nível</span><span>${icon('check', 14)} Correções explicadas</span><span>${icon('check', 14)} Salvo para praticar depois</span></div></div></section><div class="section-title"><h2>Minha biblioteca <span class="count">${state.materials.length}</span></h2><span class="subtle">Seus materiais, sempre por perto.</span></div>${state.materials.length ? `<div class="list-grid">${state.materials.map((m) => `<article class="card material-card"><div class="card-top"><span class="file-icon">${icon('folder', 24)}</span><button class="icon-button" data-delete-material="${m.id}" aria-label="Excluir ${esc(m.title)}">${icon('trash', 17)}</button></div><span class="eyebrow">${esc(m.level)} · ${new Date(m.date).toLocaleDateString('pt-BR')}</span><h3>${esc(m.title)}</h3><p class="material-preview">${esc(m.content)}</p><div class="material-actions">${button('Editar', 'edit-material', 'outline', `data-id="${m.id}"`)}${button(`${icon('bolt', 15)} Gerar exercícios`, 'generate-material', 'primary', `data-id="${m.id}"`)}<button class="icon-button" data-view-material="${m.id}" aria-label="Ler material">${icon('book', 19)}</button></div></article>`).join('')}</div>` : empty('folder', 'Sua biblioteca começa com uma ideia.', 'Que tal adicionar um tema ou aquele texto que você quer entender melhor?', button('Adicionar meu primeiro material', 'new-material'))}${!apiKey ? `<div class="api-notice">${icon('key', 20)}<span>Para gerar exercícios personalizados, escolha uma IA e conecte sua chave, incluindo opções com cota gratuita.</span><button class="text-button" data-page="settings">Configurar API ${icon('arrow', 16)}</button></div>` : ''}`;
 }
 function reviewView() {
   const errors = [...state.errors].sort((a, b) => b.count - a.count);
@@ -553,7 +553,8 @@ function action(a, el) {
         startQuiz(getQuestions(next.id, state.level), next.title, state.level, next.id);
       }
     },
-    'new-material': materialModal,
+    'new-material': () => materialModal(),
+    'edit-material': () => materialModal(state.materials.find((m) => m.id === el.dataset.id)),
     'new-word': () => wordModal(),
     'go-learn': () => navigate('learn'),
     'review-start': () => {
@@ -718,9 +719,9 @@ function addWord(word, translation, example = '') {
   save();
   toast('Palavra guardada no seu vocabulário. 🌱');
 }
-function materialModal() {
+function materialModal(existing = null) {
   openModal(
-    'O que vamos aprender hoje?',
+    existing ? 'Editar material' : 'O que vamos aprender hoje?',
     `<form id="material-form"><div class="form-row"><label>Título ou tema<input name="title" placeholder="Ex.: Pedindo um café em Londres" required maxlength="120"></label><label>Nível<select name="level">${Object.entries(
       levels,
     )
@@ -738,9 +739,24 @@ function materialModal() {
       )
       .join(
         '',
-      )}</div></fieldset></div><p class="form-note">${icon('key', 15)} ${apiKey ? `A geração usa sua chave de ${providers[provider].name}.` : 'Você pode salvar agora e conectar sua chave em Configurações para gerar depois.'}</p><div class="form-actions"><button class="btn outline" name="intent" value="save" type="submit">Salvar material</button><button class="btn primary" name="intent" value="generate" type="submit">${icon('bolt', 16)} Salvar e gerar exercícios</button></div><div id="generation-status" role="status"></div></form>`,
+      )}</div></fieldset></div><p class="form-note">${icon('key', 15)} ${apiKey ? `A geração usa sua chave de ${providers[provider].name}.` : 'Você pode salvar agora e conectar sua chave em Configurações para gerar depois.'}</p><div class="form-actions"><button class="btn outline" name="intent" value="save" type="submit">${existing ? 'Salvar alterações' : 'Salvar material'}</button><button class="btn primary" name="intent" value="generate" type="submit">${icon('bolt', 16)} Salvar e gerar exercícios</button></div><div id="generation-status" role="status"></div></form>`,
     'wide-modal',
   );
+  if (existing) {
+    const form = $('#material-form');
+    form.elements.title.value = existing.title;
+    form.elements.content.value = existing.content;
+    form.elements.level.value = existing.level;
+    form.elements.count.value = String(existing.count || 6);
+    form.querySelectorAll('[name="types"]').forEach((input) => {
+      input.checked = (existing.types || Object.keys(typeLabels)).includes(input.value);
+    });
+    const note = document.createElement('p');
+    note.className = 'form-note';
+    note.textContent =
+      'As alterações serão usadas nas próximas gerações. As trilhas já criadas e seu progresso continuam salvos.';
+    form.querySelector('.form-actions').before(note);
+  }
   $('#material-file').onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -772,15 +788,18 @@ function materialModal() {
       return;
     }
     const m = {
-      id: uid(),
+      ...(existing || {}),
+      id: existing?.id || uid(),
       title: f.get('title').trim(),
       content: f.get('content').trim(),
       level: f.get('level'),
       count: Number(f.get('count')),
       types,
-      date: new Date().toISOString(),
+      date: existing?.date || new Date().toISOString(),
     };
-    state.materials.push(m);
+    if (existing)
+      state.materials = state.materials.map((item) => (item.id === existing.id ? m : item));
+    else state.materials.push(m);
     save();
     if (e.submitter.value === 'generate' && apiKey) await generateMaterial(m);
     else {
@@ -789,7 +808,9 @@ function materialModal() {
       toast(
         e.submitter.value === 'generate'
           ? 'Material salvo. Configure sua chave de API para gerar os exercícios.'
-          : 'Material salvo na sua biblioteca.',
+          : existing
+            ? 'Material atualizado na sua biblioteca.'
+            : 'Material salvo na sua biblioteca.',
       );
     }
   };

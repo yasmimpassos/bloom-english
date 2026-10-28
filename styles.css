@@ -1304,6 +1304,8 @@ textarea::placeholder {
 }
 .material-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   margin-top: 20px;

@@ -567,3 +567,45 @@ for (const provider of ['groq', 'gemini', 'openrouter']) {
     expect(saved).not.toContain('test-secret');
   });
 }
+
+test('editing a library material persists in place and closing discards unsaved edits', async ({
+  page,
+}) => {
+  await page.goto('/#materials');
+  await page.getByRole('button', { name: 'Adicionar material', exact: false }).first().click();
+  await page.locator('[name="title"]').fill('Cafeteria');
+  await page.locator('#material-content').fill('Order coffee.');
+  await page.getByRole('button', { name: 'Salvar material', exact: true }).click();
+  const original = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('bloom.v1')).materials[0],
+  );
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await expect(page.locator('[name="title"]')).toHaveValue('Cafeteria');
+  await page.locator('[name="title"]').fill('Modal verbs');
+  await page.locator('#material-content').fill('Can, could and should.');
+  await page.locator('[name="level"]').selectOption('B1');
+  await page.locator('[name="count"]').selectOption('12');
+  await page.locator('[name="types"][value="reading"]').uncheck();
+  await page.getByRole('button', { name: 'Salvar alterações' }).click();
+  await page.reload();
+  await expect(page.locator('.material-card')).toHaveCount(1);
+  await expect(page.locator('.material-card')).toContainText('Modal verbs');
+  const updated = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('bloom.v1')).materials[0],
+  );
+  expect(updated).toMatchObject({
+    id: original.id,
+    date: original.date,
+    title: 'Modal verbs',
+    content: 'Can, could and should.',
+    level: 'B1',
+    count: 12,
+  });
+  expect(updated.types).not.toContain('reading');
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  await expect(page.locator('[name="count"]')).toHaveValue('12');
+  await expect(page.locator('[name="types"][value="reading"]')).not.toBeChecked();
+  await page.locator('[name="title"]').fill('Unsaved');
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click();
+  await expect(page.locator('.material-card')).toContainText('Modal verbs');
+});

@@ -78,10 +78,22 @@ function config({ provider, key, model }) {
       'No OpenRouter, escolha openrouter/free ou um modelo terminado em :free. Modelos pagos estão bloqueados.',
     );
 }
-export function providerError(provider, status) {
+export function providerError(provider, status, detail = {}) {
   const name = providers[provider]?.name || 'provedor';
+  const code = typeof detail.code === 'string' ? detail.code : '';
+  const message = typeof detail.message === 'string' ? detail.message : '';
+  if (provider === 'groq') {
+    if (code === 'invalid_api_key')
+      return 'A chave Groq não foi aceita. Crie uma chave em console.groq.com/keys e cole em Configurações com Groq selecionado.';
+    if (code === 'json_validate_failed')
+      return 'O Groq respondeu, mas não conseguiu montar os exercícios no formato solicitado. Sua chave foi aceita; tente gerar novamente com 6 exercícios.';
+    if (status === 413 || /request too large|reduce.*tokens/i.test(message))
+      return 'O material excede o limite de tokens da sua conta Groq. Reduza o texto e escolha 6 exercícios antes de tentar novamente.';
+    if (code === 'model_decommissioned' || code === 'model_not_found')
+      return 'Este modelo não está disponível no Groq. Em Configurações, clique em Usar modelo sugerido e salve novamente.';
+  }
   const messages = {
-    400: `${name} não aceitou a chave, o modelo ou o formato. Confira a chave e experimente o modelo sugerido.`,
+    400: `${name} não aceitou o pedido de geração. Confira o modelo e tente com um material menor. Esse erro não indica necessariamente uma chave inválida.`,
     401: `Sua chave não foi aceita por ${name}. Confira a chave em Configurações.`,
     402: `${name} não disponibilizou a cota ou o saldo necessário. Use um modelo gratuito disponível ou outro provedor.`,
     403:
@@ -97,9 +109,22 @@ export function providerError(provider, status) {
   );
 }
 async function readResponse(response, provider) {
-  if (!response.ok) throw new Error(providerError(provider, response.status));
-  const data = await response.json();
-  if (data.error) throw new Error(providerError(provider, Number(data.error.code) || 502));
+  // Do not expose upstream messages: they may echo credentials or study material.
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    if (!response.ok) throw new Error(providerError(provider, response.status));
+    throw new Error('O provedor retornou uma resposta ilegível. Tente novamente.');
+  }
+  if (!response.ok || data?.error) {
+    const status = response.ok ? Number(data.error.code) || 502 : response.status;
+    let message = providerError(provider, status, data?.error || {});
+    const retry = Number(response.headers.get('retry-after'));
+    if (status === 429 && Number.isFinite(retry) && retry > 0 && retry <= 86400)
+      message += ` Tente novamente em cerca de ${Math.ceil(retry)} segundos.`;
+    throw new Error(`${message} (HTTP ${status})`);
+  }
   return data;
 }
 export function connectionRequest(settings) {

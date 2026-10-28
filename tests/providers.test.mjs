@@ -125,3 +125,42 @@ test('connection checks validate Groq model availability and OpenRouter keys wit
   });
   assert.match(message, /disponibilidade/);
 });
+
+test('Groq failures distinguish credentials, oversized input and invalid generation without leaking data', async () => {
+  for (const [status, code, message, expected] of [
+    [401, 'invalid_api_key', 'secret-value', /chave Groq não foi aceita/],
+    [400, 'json_validate_failed', 'secret-value', /Sua chave foi aceita/],
+    [413, '', 'secret-value', /Reduza o texto/],
+    [400, 'model_decommissioned', 'secret-value', /Usar modelo sugerido/],
+    [429, '', 'Request too large secret-value', /Reduza o texto/],
+  ]) {
+    await assert.rejects(
+      generateLesson(
+        settings('groq'),
+        material,
+        async () => new Response(JSON.stringify({ error: { code, message } }), { status }),
+      ),
+      (error) => expected.test(error.message) && !error.message.includes('secret-value'),
+    );
+  }
+});
+test('rate limits include retry guidance and non-JSON failures retain their HTTP diagnosis', async () => {
+  await assert.rejects(
+    testConnection(
+      settings('groq'),
+      async () =>
+        new Response('{}', {
+          status: 429,
+          headers: { 'retry-after': '12' },
+        }),
+    ),
+    /12 segundos.*HTTP 429/,
+  );
+  await assert.rejects(
+    testConnection(
+      settings('groq'),
+      async () => new Response('<html>down</html>', { status: 503 }),
+    ),
+    /HTTP 503/,
+  );
+});

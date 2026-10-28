@@ -204,3 +204,31 @@ test('Groq does not retry unrelated failures and stops after one format fallback
     assert.equal(calls, expectedCalls);
   }
 });
+
+test('Groq reserves output space for explained exercises and limits GPT-OSS reasoning', () => {
+  for (const count of [6, 12, 18]) {
+    const request = generationRequest(settings('groq'), { ...material, count });
+    assert.equal(request.body.max_completion_tokens, 1024 + count * 850);
+    assert.equal(request.body.reasoning_effort, 'low');
+  }
+  const custom = generationRequest(
+    { ...settings('groq'), model: 'llama-3.3-70b-versatile' },
+    material,
+  );
+  assert.equal(custom.body.reasoning_effort, undefined);
+  assert.equal(
+    generationRequest(settings('openrouter'), material).body.reasoning_effort,
+    undefined,
+  );
+});
+test('truncation reports an output limit without blaming the study material', () => {
+  assert.throws(
+    () =>
+      parseLessonResponse('groq', {
+        choices: [{ finish_reason: 'length', message: { content: '{"questions":[' } }],
+      }),
+    (error) =>
+      error.message.includes('não do tamanho do seu material') &&
+      !error.message.includes('reduzir o material'),
+  );
+});

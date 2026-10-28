@@ -123,7 +123,9 @@ async function readResponse(response, provider) {
     const retry = Number(response.headers.get('retry-after'));
     if (status === 429 && Number.isFinite(retry) && retry > 0 && retry <= 86400)
       message += ` Tente novamente em cerca de ${Math.ceil(retry)} segundos.`;
-    throw new Error(`${message} (HTTP ${status})`);
+    const code = data?.error?.code;
+    const diagnostic = typeof code === 'string' && /^[a-z_]{1,60}$/.test(code) ? ` · ${code}` : '';
+    throw new Error(`${message} (HTTP ${status}${diagnostic})`);
   }
   return data;
 }

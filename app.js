@@ -13,7 +13,7 @@ import {
   streak,
   recordAnswer,
   scheduleDoubt,
-  validateQuestion,
+  prepareGeneratedLesson,
   validateBackup,
 } from './learning.js';
 
@@ -1192,15 +1192,27 @@ async function generateMaterial(material) {
     `<div class="generation-loading"><span class="spinner"></span><strong>Transformando seu material em aprendizado…</strong><p>Criando ${material.count || 6} exercícios no nível ${esc(material.level)}. Pode levar alguns instantes.</p></div>`;
   const settings = { provider, key: apiKey, model };
   try {
-    const questions = await generateLesson(settings, material);
-    if (
-      !Array.isArray(questions) ||
-      questions.length !== (material.count || 6) ||
-      !questions.every(validateQuestion)
-    )
+    let prepared;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const requestMaterial =
+        attempt === 0
+          ? material
+          : {
+              ...material,
+              correction: `A tentativa anterior falhou na validação: ${prepared.issues.join(' ')} Gere novamente a lista completa, corrigindo esses problemas.`,
+            };
+      const raw = await generateLesson(settings, requestMaterial);
+      prepared = prepareGeneratedLesson(raw, material.count || 6, material.types);
+      if (!prepared.issues.length) break;
+      if (attempt === 0 && $('#generation-status'))
+        $('#generation-status').textContent =
+          'A IA está corrigindo a estrutura dos exercícios. Aguarde…';
+    }
+    if (prepared.issues.length)
       throw new Error(
-        'Os exercícios vieram em um formato incompleto. Seu material está salvo; tente gerar novamente.',
+        `A IA não conseguiu concluir a correção. ${prepared.issues.join(' ')} Seu material está salvo.`,
       );
+    const questions = prepared.questions;
     const normalized = questions.map((q) => {
       const item = { ...q };
       if (!['choice', 'reading', 'match'].includes(q.type)) delete item.options;

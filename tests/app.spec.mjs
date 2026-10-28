@@ -609,3 +609,41 @@ test('editing a library material persists in place and closing discards unsaved 
   await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   await expect(page.locator('.material-card')).toContainText('Modal verbs');
 });
+
+test('generation repairs an incomplete lesson once and saves only a valid complete result', async ({
+  page,
+}) => {
+  await page.goto('/#settings');
+  await page.locator('#api-key').fill('gsk-test-only');
+  await page.getByRole('button', { name: 'Salvar chave', exact: true }).click();
+  let calls = 0;
+  await page.route('https://api.groq.com/openai/v1/chat/completions', (route) => {
+    calls++;
+    const body = route.request().postDataJSON();
+    if (calls === 2) expect(body.messages[1].content).toContain('correction');
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ questions: calls === 1 ? [] : getQuestions('coffee') }),
+            },
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto('/#materials');
+  await page.getByRole('button', { name: 'Adicionar material', exact: false }).first().click();
+  await page.locator('[name="title"]').fill('Corporate emphasis');
+  await page
+    .locator('#material-content')
+    .fill('Cleft sentences, do/does/did emphasis and inversion in business.');
+  await page.getByRole('button', { name: 'Salvar e gerar exercícios', exact: true }).click();
+  await expect(page.locator('.quiz-modal')).toBeVisible();
+  expect(calls).toBe(2);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bloom.v1')));
+  expect(saved.custom).toHaveLength(1);
+  expect(saved.custom[0].questions).toHaveLength(6);
+});

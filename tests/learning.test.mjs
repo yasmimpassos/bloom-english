@@ -7,6 +7,7 @@ import {
   recordAnswer,
   scheduleDoubt,
   validateQuestion,
+  prepareGeneratedLesson,
   validateBackup,
   streak,
   dayKey,
@@ -180,4 +181,45 @@ test('every built-in exercise has conceptual help and passive voice explains con
     }).intro,
     'Explicação personalizada.',
   );
+});
+
+test('generated lessons normalize equivalent answers and shuffled words without changing source data', () => {
+  const order = {
+    type: 'order',
+    prompt: 'Monte a inversão',
+    answer: 'Never had I seen this.',
+    words: ['this.', 'I', 'Never', 'seen', 'had'],
+    explanation: 'Inverta o auxiliar.',
+  };
+  const choice = {
+    type: 'choice',
+    prompt: 'Escolha',
+    answer: 'we do agree.',
+    options: ['We do agree.', 'We does agree.'],
+    explanation: 'Use do.',
+    accepted: null,
+  };
+  const result = prepareGeneratedLesson([order, choice], 2);
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.questions[0].words.join(' '), order.answer);
+  assert.equal(result.questions[1].answer, 'We do agree.');
+  assert.equal(order.words[0], 'this.');
+});
+test('incomplete lessons report count and broken question without inventing answers', () => {
+  const result = prepareGeneratedLesson(
+    [
+      {
+        type: 'order',
+        prompt: 'Monte',
+        answer: 'Never had I agreed.',
+        words: ['Never', 'I', 'agreed.'],
+        explanation: 'Inversão.',
+      },
+    ],
+    6,
+  );
+  assert.match(result.issues.join(' '), /recebidos 1.*esperados 6/);
+  assert.match(result.issues.join(' '), /Exercício 1.*palavras/);
+  assert.deepEqual(result.questions[0].words, ['Never', 'I', 'agreed.']);
+  assert.ok(prepareGeneratedLesson([{ type: 'reading', passage: 42 }], 1).issues.length);
 });

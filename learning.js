@@ -82,6 +82,60 @@ export function validateQuestion(q) {
     return false;
   return true;
 }
+// Normalize only equivalent representations; never invent an answer or missing content.
+export function prepareGeneratedLesson(raw, count, types) {
+  const issues = [];
+  if (!Array.isArray(raw))
+    return { questions: [], issues: ['A IA não retornou uma lista de exercícios.'] };
+  if (raw.length !== count)
+    issues.push(`Foram recebidos ${raw.length} exercícios; eram esperados ${count}.`);
+  const questions = raw.map((value, index) => {
+    const q = value && typeof value === 'object' ? { ...value } : {};
+    for (const field of ['prompt', 'answer', 'explanation', 'help', 'passage'])
+      if (typeof q[field] === 'string') q[field] = q[field].trim();
+    if (q.accepted == null) delete q.accepted;
+    if (q.help == null) delete q.help;
+    if (
+      ['choice', 'reading', 'match'].includes(q.type) &&
+      Array.isArray(q.options) &&
+      typeof q.answer === 'string'
+    ) {
+      const equivalent = q.options.filter(
+        (option) => typeof option === 'string' && normalize(option) === normalize(q.answer),
+      );
+      if (equivalent.length === 1) q.answer = equivalent[0];
+    }
+    if (
+      q.type === 'order' &&
+      typeof q.answer === 'string' &&
+      Array.isArray(q.words) &&
+      q.words.every((word) => typeof word === 'string')
+    ) {
+      const tokens = q.answer.split(/\s+/);
+      const bag = (words) => words.map(normalize).sort().join('\n');
+      if (bag(tokens) === bag(q.words)) q.words = tokens;
+    }
+    if (!validateQuestion(q) || (types && !types.includes(q.type))) {
+      let reason = 'campos obrigatórios ausentes ou inválidos';
+      if (
+        !['choice', 'fill', 'order', 'write', 'reading', 'match'].includes(q.type) ||
+        (types && !types.includes(q.type))
+      )
+        reason = 'tipo de exercício não solicitado ou desconhecido';
+      else if (
+        ['choice', 'reading', 'match'].includes(q.type) &&
+        (!Array.isArray(q.options) || !q.options.includes(q.answer))
+      )
+        reason = 'a resposta não corresponde às alternativas';
+      else if (q.type === 'order') reason = 'as palavras fornecidas não formam a resposta';
+      else if (q.type === 'reading' && (typeof q.passage !== 'string' || !q.passage.trim()))
+        reason = 'o texto de leitura está ausente';
+      issues.push(`Exercício ${index + 1}: ${reason}.`);
+    }
+    return q;
+  });
+  return { questions, issues };
+}
 export function validateBackup(d) {
   const str = (s, max = 30000) => typeof s === 'string' && s.length <= max;
   const id = (s) => typeof s === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(s);

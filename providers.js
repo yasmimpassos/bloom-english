@@ -215,6 +215,7 @@ export function generationRequest(settings, material) {
     level: material.level,
     count: material.count || 6,
     types,
+    ...(material.correction ? { correction: material.correction } : {}),
   });
   if (provider === 'gemini')
     return {

@@ -164,3 +164,43 @@ test('rate limits include retry guidance and non-JSON failures retain their HTTP
     /HTTP 503/,
   );
 });
+
+test('Groq retries a rejected schema once using JSON mode with the same credentials and model', async () => {
+  const calls = [];
+  const result = await generateLesson(settings('groq'), material, async (url, options) => {
+    calls.push({ url, ...options, body: JSON.parse(options.body) });
+    return calls.length === 1
+      ? new Response(JSON.stringify({ error: { message: 'response_format schema rejected' } }), {
+          status: 400,
+        })
+      : new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"questions":[{"prompt":"Coffee?"}]}' } }],
+          }),
+        );
+  });
+  assert.equal(result[0].prompt, 'Coffee?');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].body.response_format.type, 'json_schema');
+  assert.equal(calls[1].body.response_format.type, 'json_object');
+  assert.equal(calls[0].url, calls[1].url);
+  assert.deepEqual(calls[0].headers, calls[1].headers);
+  assert.equal(calls[0].body.model, calls[1].body.model);
+});
+test('Groq does not retry unrelated failures and stops after one format fallback', async () => {
+  for (const [status, code, expectedCalls] of [
+    [400, 'invalid_api_key', 1],
+    [401, '', 1],
+    [429, '', 1],
+    [400, 'json_validate_failed', 2],
+  ]) {
+    let calls = 0;
+    await assert.rejects(
+      generateLesson(settings('groq'), material, async () => {
+        calls++;
+        return new Response(JSON.stringify({ error: { code } }), { status });
+      }),
+    );
+    assert.equal(calls, expectedCalls);
+  }
+});

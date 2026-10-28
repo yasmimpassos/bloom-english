@@ -125,7 +125,15 @@ async function readResponse(response, provider) {
       message += ` Tente novamente em cerca de ${Math.ceil(retry)} segundos.`;
     const code = data?.error?.code;
     const diagnostic = typeof code === 'string' && /^[a-z_]{1,60}$/.test(code) ? ` · ${code}` : '';
-    throw new Error(`${message} (HTTP ${status}${diagnostic})`);
+    const error = new Error(`${message} (HTTP ${status}${diagnostic})`);
+    error.status = status;
+    error.formatRejected =
+      status === 400 &&
+      (code === 'json_validate_failed' ||
+        /response_format|json.schema|structured.output|json.*validat/i.test(
+          data?.error?.message || '',
+        ));
+    throw error;
   }
   return data;
 }
@@ -292,14 +300,30 @@ export function parseLessonResponse(provider, data) {
 }
 export async function generateLesson(settings, material, fetcher = fetch) {
   const request = generationRequest(settings, material);
-  const data = await readResponse(
-    await fetcher(request.url, {
-      method: 'POST',
-      headers: request.headers,
-      body: JSON.stringify(request.body),
-      signal: AbortSignal.timeout(120000),
-    }),
-    settings.provider,
-  );
+  const signal = AbortSignal.timeout(120000);
+  const send = async () =>
+    readResponse(
+      await fetcher(request.url, {
+        method: 'POST',
+        headers: request.headers,
+        body: JSON.stringify(request.body),
+        signal,
+      }),
+      settings.provider,
+    );
+  let data;
+  try {
+    data = await send();
+  } catch (error) {
+    if (
+      settings.provider !== 'groq' ||
+      !error.formatRejected ||
+      request.body.response_format?.type !== 'json_schema'
+    )
+      throw error;
+    // Retry only a rejected structured format, once, using the same account/model.
+    request.body.response_format = { type: 'json_object' };
+    data = await send();
+  }
   return parseLessonResponse(settings.provider, data);
 }
